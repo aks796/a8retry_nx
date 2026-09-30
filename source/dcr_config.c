@@ -195,10 +195,12 @@ static const Opt k_opts[] = {
     {"performance", "cpu_clock", "1785",
      "The CPU clock in MHz from PLAY on: 1785 (the highest the Switch uses\n"
      "# itself, for its loading screens), 1581, 1428, 1224 or 1020 (the normal\n"
-     "# clock). The game needs 1785 for a steady 60 fps in races; lower ones use\n"
-     "# less battery. The GPU clock is not affected. The HOME menu and the start\n"
-     "# screen run at the normal clock.",
-     K_INT, "1020,1224,1428,1581,1785", &g_cfg.cpu_clock},
+     "# clock), or system: never touched. The game needs 1785 for a steady 60 fps\n"
+     "# in races; lower ones use less battery. The GPU clock is not affected. The\n"
+     "# HOME menu and the start screen run at the normal clock. Overclocking tools\n"
+     "# (sys-clk and the like) win: once one changes the clock, the game leaves\n"
+     "# it alone until it is closed.",
+     K_INT, "system,1020,1224,1428,1581,1785", &g_cfg.cpu_clock},
     {"performance", "gl_thread", "true",
      "The graphics driver's work on a second CPU core (Mesa's glthread), beside\n"
      "# the game's own, so the rendering thread has less to do.\n"

@@ -349,8 +349,15 @@ feeds three 1024-frame audout buffers.
 in races took four changes:
 
 1. The CPU at 1785 MHz through clkrst (pcv before 8.0.0). The system resets
-   the clock, so it is re-applied every 250 ms. It goes back to 1020 MHz when
-   the HOME menu is up and on exit. Configurable: `[performance] cpu_clock`.
+   the clock to 1020 MHz on a dock change, after sleep and on boost-mode
+   changes, so it is checked every 250 ms and set again. It goes back to
+   1020 MHz when the HOME menu is up and on exit. Configurable:
+   `[performance] cpu_clock`, where `system` never touches it.
+   Overclocking tools (sys-clk, hoc-clk) win. Any clock other than 1020
+   that the port did not set, or 1020 put back three times within 30 s,
+   means a tool has the clock. From then on the port changes nothing for the
+   rest of the run: no restoring, no loading boost, no HOME-menu or exit
+   clock (`source/a8r_perf.c`, `cpu_apply` and `cpu_yield`).
 2. The handheld GPU at 460.8 MHz (apm configuration 0x92220007).
 3. The GL thread one priority above the other guest threads (58), so that
    the kernel's time slicing does not preempt it.

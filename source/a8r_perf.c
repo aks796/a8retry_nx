@@ -34,7 +34,16 @@
  * change, after sleep or a boost-mode change, so a thread checks it every
  * 250 ms and sets it again; the HOME menu gets the normal clock. With the
  * clock driver, loading frames (dcr_boost.c) are boosted with the CPU clock
- * too, the GPU untouched. MIT.
+ * too, the GPU untouched.
+ *
+ * Overclocking tools (sys-clk, hoc-clk and the like) win. Only a change back
+ * to the normal 1020 MHz is taken for the system's own reset and undone;
+ * any other clock that is not the one this program set last is a tool's, and
+ * from then on this program leaves the clock alone for the rest of the run
+ * (no restoring, no loading boost, no clock for the HOME menu or at exit).
+ * So does 1020 put back three times within 30 s (a tool holding 1020), a
+ * clock that is neither 1020 nor cpu_clock when the game starts, and
+ * cpu_clock = system. MIT.
  */
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
@@ -63,6 +72,19 @@ static volatile int g_clk_stop, g_clk_focus = 1, g_clk_boost;
 static int g_clk_thread_up;
 static u32 g_clk_want;            /* cpu_clock, in Hz */
 static u32 g_clk_resets;          /* times the system had put its own clock back */
+static u32 g_clk_last;            /* the clock this program set last (0: none yet) */
+static volatile int g_clk_yield;  /* the clock is the system's or a tool's: never set it again */
+static u64 g_clk_reset_at[3];     /* when the last three resets to 1020 came */
+
+static int near_hz(u32 a, u32 b) { return a + 2000000u >= b && a <= b + 2000000u; }
+
+/* From here on the clock is not this program's (said once). */
+static void cpu_yield(const char *why, u32 now) {
+  if (g_clk_yield)
+    return;
+  g_clk_yield = 1;
+  debugPrintf("[perf] CPU clock left alone from here on (%u MHz): %s\n", (unsigned)(now / 1000000u), why);
+}
 
 static Result cpu_get(u32 *hz) {
   return g_clk_kind == 1 ? clkrstGetClockRate(&g_clk, hz) : pcvGetClockRate(PcvModule_CpuBus, hz);
@@ -71,14 +93,28 @@ static Result cpu_set(u32 hz) {
   return g_clk_kind == 1 ? clkrstSetClockRate(&g_clk, hz) : pcvSetClockRate(PcvModule_CpuBus, hz);
 }
 
-/* the clock this moment calls for, set if it is not what the CPU runs at */
+/* the clock this moment calls for, set if it is not what the CPU runs at --
+ * unless someone else has changed it since this program last set it */
 static void cpu_apply(void) {
   mutexLock(&g_clk_mx);
   u32 want = !g_clk_focus ? CPU_NORMAL_HZ : g_clk_boost ? CPU_BOOST_HZ : g_clk_want, now = 0;
-  if (g_clk_kind && R_SUCCEEDED(cpu_get(&now)) && (now + 2000000u < want || now > want + 2000000u)) {
-    if (now < want && g_clk_focus && !g_clk_boost && now == CPU_NORMAL_HZ)
-      g_clk_resets++;
-    cpu_set(want);
+  if (g_clk_kind && !g_clk_yield && R_SUCCEEDED(cpu_get(&now))) {
+    if (g_clk_last && !near_hz(now, g_clk_last)) {
+      if (!near_hz(now, CPU_NORMAL_HZ)) {
+        cpu_yield("another program changed it (an overclocking tool?)", now);
+      } else { /* the system's own reset: a dock change, sleep, boost mode */
+        u64 t = armGetSystemTick();
+        g_clk_reset_at[g_clk_resets % 3] = t;
+        g_clk_resets++;
+        if (g_clk_resets >= 3 && armTicksToNs(t - g_clk_reset_at[g_clk_resets % 3]) < 30000000000ull)
+          cpu_yield("put back to 1020 MHz three times within 30 s (a tool holding it?)", now);
+      }
+    }
+    if (!g_clk_yield) {
+      if (!near_hz(now, want))
+        cpu_set(want);
+      g_clk_last = want;
+    }
   }
   mutexUnlock(&g_clk_mx);
 }
@@ -91,10 +127,11 @@ static void cpu_watch(void *arg) {
   }
 }
 
-int a8r_cpu_managed(void) { return g_clk_kind != 0; }
+int a8r_cpu_managed(void) { return g_clk_kind != 0 && !g_clk_yield; }
+int a8r_cpu_hands_off(void) { return g_clk_yield; }
 
 void a8r_cpu_boost(int on) {
-  if (!g_clk_kind || g_clk_boost == on)
+  if (!g_clk_kind || g_clk_yield || g_clk_boost == on)
     return;
   g_clk_boost = on;
   cpu_apply();
@@ -102,13 +139,18 @@ void a8r_cpu_boost(int on) {
 
 /* on_applet (a8r_boot.c): the HOME menu or sleep gets the normal clock */
 void a8r_perf_focus(int focused) {
-  if (!g_clk_kind || g_clk_focus == focused)
+  if (!g_clk_kind || g_clk_yield || g_clk_focus == focused)
     return;
   g_clk_focus = focused;
   cpu_apply();
 }
 
 static void cpu_start(void) {
+  if (!dcr_config()->cpu_clock) { /* cpu_clock = system */
+    g_clk_yield = 1;
+    debugPrintf("[perf] CPU clock: the system's (cpu_clock = system): not touched, no loading boost\n");
+    return;
+  }
   if (hosversionAtLeast(8, 0, 0)) {
     if (R_SUCCEEDED(clkrstInitialize())) {
       if (R_SUCCEEDED(clkrstOpenSession(&g_clk, PcvModuleId_CpuBus, 3)))
@@ -132,6 +174,10 @@ static void cpu_start(void) {
   }
   mutexInit(&g_clk_mx);
   g_clk_want = (u32)dcr_config()->cpu_clock * 1000000u;
+  if (!near_hz(was, CPU_NORMAL_HZ) && !near_hz(was, g_clk_want))
+    cpu_yield("it was not the normal clock when the game started (an overclocking tool?)", was);
+  else if (near_hz(was, g_clk_want))
+    g_clk_last = g_clk_want;
   cpu_apply();
   g_clk_resets = 0;
   u32 now = 0;
@@ -154,7 +200,8 @@ void a8r_perf_exit(void) {
     threadClose(&g_clk_thread);
   }
   mutexLock(&g_clk_mx);
-  cpu_set(CPU_NORMAL_HZ);
+  if (!g_clk_yield) /* a tool's clock, or the system's, stays */
+    cpu_set(CPU_NORMAL_HZ);
   mutexUnlock(&g_clk_mx);
 }
 

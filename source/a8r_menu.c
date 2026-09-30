@@ -540,7 +540,9 @@ static const Row k_page3[] = {
       "handheld (docked it runs at 768 MHz either way). Uses more battery.",
       "performance", "gpu_boost_handheld"),
     CY("=CPU clock: ", "=The processor's speed while the game runs. 1785 MHz holds races at 60 fps; lower "
-       "speeds use less battery. This screen and the HOME menu run at the normal 1020 MHz.",
+       "speeds use less battery. System leaves the clock alone, for an overclocking tool such as sys-clk; "
+       "a tool that changes the clock during play also takes over. This screen and the HOME menu run at "
+       "the normal 1020 MHz.",
        "performance", "cpu_clock", F_MHZ),
     B("=Full CPU speed while loading", "=The processor at 1785 MHz while the game starts and loads, when "
       "the CPU clock above is set lower.", "performance", "boost_cpu_when_loading"),
@@ -612,6 +614,8 @@ static void row_label(const Row *r, char *out, size_t cap, int arrows) {
         snprintf(val, sizeof val, "%s", k_words[i][1]);
   } else if (r->fmt == F_SECOFF && !strcmp(v, "0")) {
     snprintf(val, sizeof val, "Off");
+  } else if (r->fmt == F_MHZ && !strcasecmp(v, "system")) {
+    snprintf(val, sizeof val, "System");
   } else {
     snprintf(val, sizeof val, "%s%s", v, r->fmt == F_PCT ? "%" : r->fmt == F_X ? "x"
                                          : r->fmt == F_SEC || r->fmt == F_SECOFF ? " s"

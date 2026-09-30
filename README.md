@@ -192,6 +192,11 @@ Races run at 60 fps on hardware, with the CPU at 1785 MHz (the default,
 adjustable on the SWITCH page). Career races, the garage, car collections,
 audio, controllers, the touchscreen and saves are working.
 
+Overclocking tools such as sys-clk take priority. Once one changes the CPU
+clock, the game leaves it alone until it is closed. Set **OPTIONS > SWITCH >
+CPU clock** to **System** to leave the clock to the Switch or the tool from
+the start.
+
 Online features are not available. The game runs as a device without a
 network connection, so multiplayer, online events and store features do not
 work.

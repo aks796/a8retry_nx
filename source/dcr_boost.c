@@ -129,6 +129,8 @@ static void cpu_report(char *out, size_t cap) {
 }
 
 static int set_boost(int on) {
+  if (a8r_cpu_hands_off()) /* cpu_clock = system, or an overclocking tool took the clock */
+    return 0;
   if (a8r_cpu_managed()) { /* the CPU clock alone, the GPU untouched (a8r_perf.c) */
     a8r_cpu_boost(on);
     return 1;

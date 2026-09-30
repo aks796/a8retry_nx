@@ -67,6 +67,7 @@ void a8r_perf_clocks(void);       /* a8r_perf.c: the clocks, frame times */
 void a8r_perf_exit(void);         /* the CPU back to its normal clock */
 void a8r_perf_focus(int focused); /* the HOME menu, sleep: the normal CPU clock */
 int a8r_cpu_managed(void);        /* the CPU clock is this program's (clkrst / pcv) */
+int a8r_cpu_hands_off(void);      /* the clock is the system's or a tool's: no boost of any kind */
 void a8r_cpu_boost(int on);       /* loading: the CPU at 1785 MHz, the GPU untouched */
 void a8r_perf_gl_thread(void);    /* the GL thread, once: above the other guest threads */
 int a8r_glthread_up(void);        /* Mesa's glthread worker is running */

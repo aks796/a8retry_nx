@@ -61,7 +61,7 @@ typedef struct {
   /* [performance], [debug] */
   int boost;
   int gpu_boost;           /* [performance] gpu_boost_handheld: GPU 460.8 MHz in handheld */
-  int cpu_clock;           /* [performance] cpu_clock: MHz while the game runs (a8r_perf.c) */
+  int cpu_clock;           /* [performance] cpu_clock: MHz while the game runs, 0 = system (a8r_perf.c) */
   int gl_thread;           /* [performance] gl_thread: Mesa's glthread for the game's context */
   int gl_selftest;
   int boot_log;
