@@ -1,0 +1,22 @@
+# build outputs
+build/
+*.elf
+*.nso
+*.npdm
+*.nsp
+*.nro
+*.nacp
+*.build
+*.map
+launcher/romfs/
+
+# the 32-bit Mesa and libdrm_nouveau build (mesa32), installed locally
+portlibs32/
+
+# game files, logs
+*.apk
+*.obb
+*.zip
+debug.log
+crash.log
+.DS_Store
