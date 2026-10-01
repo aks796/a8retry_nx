@@ -14,10 +14,10 @@ items below were found in one of the three and apply to all of them.
 
 File paths are relative to this project.
 
-**The android32 runtime.** Since build 202610010034 the code every 32-bit port
+**The android32 runtime.** Since build 202610010034 (now 202610010929) the code every 32-bit port
 shares (the loader, bionic, JNI core, GL glue, clocks, paths, setup, config
 engine, crash handler, watchdog, `main()` and the launcher) is the android32
-runtime, linked in as `runtime/` (built against commit `42f2519`). Where this
+runtime, linked in as `runtime/` (built against commit `32f2277`). Where this
 file names a shared file, such as `source/bionic_time.c` or
 `source/dcr_sched.c`, it is now in `runtime/source/`. This port keeps the
 game's own files (`a8r_*.c`, `dcr_config.c` as an option table, `dcr_prefs.c`)
@@ -32,7 +32,7 @@ callbacks:
 - `a8r_boot.c`: the focus callbacks and the watchdog hold;
 - `launcher/source/a8r_launcher.c`: the zips, the OBB check, the
   missing-APK text and the instructions (the launcher needs runtime
-  `a69d175` or newer for the missing-APK text).
+  `eed59a7` or newer for the missing-APK text).
 
 ---
 
