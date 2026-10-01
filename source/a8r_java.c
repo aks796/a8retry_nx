@@ -764,6 +764,9 @@ const JMethodDef jni_method_defs[] = {
 
     /* ---- SendInfo (initMethods) ---- */
     {SI, "getSaveFolder", "()" S, h_getSaveFolder},
+    /* The social framework's cache folder is this + "/sf_cache" (getSD_path):
+     * unanswered, it was "/sf_cache", at the SD card's root. */
+    {SI, "getSDFolder", "()" S, h_getSDFolder},
     {SI, "getGLUID", "()[I", h_sendinfo_getGLUID},
     {SI, "getGLDID", "()" S, h_androidId},
     {SI, "getPhoneCarrier", "()" S, h_empty},

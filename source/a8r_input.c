@@ -47,7 +47,7 @@
  * arm-none-eabi, whose enums are as small as their values allow: HidNpadIdType
  * is one byte, so the list went as bytes that hid reads as 32-bit IDs of no
  * real slot, and only the attached Joy-Cons (the handheld slot) worked (found
- * in the Crossy Road port, hardware 2026-09-25). set_supported_npad_ids()
+ * in the Crossy Road port, hardware 2026-09-25). rt_pad_setup() (rt_pad.c)
  * sends it again as 32-bit IDs; any player's controller drives the game.
  *
  * Touchscreen: GL2JNIView.onTouchEvent -> touchEvent(1 down / 2 move / 0 up,
@@ -58,6 +58,7 @@
 #include <switch.h>
 
 #include "a8r.h"
+#include "rt_pad.h"
 #include "dcr_config.h"
 #include "util.h"
 
@@ -103,25 +104,13 @@ static KeyMap g_map[] = {
 
 extern volatile uint8_t *g_a8r_stick_moved; /* a8r_loader.c */
 
-/* hid SetSupportedNpadIdType (command 102), with 32-bit IDs: players 1-8 and
- * handheld (see the notes at the top). */
-static Result set_supported_npad_ids(void) {
-  static const u32 ids[] = {0, 1, 2, 3, 4, 5, 6, 7, 0x20};
-  u64 aruid = appletGetAppletResourceUserId();
-  return serviceDispatchIn(hidGetServiceSession(), 102, aruid,
-                           .buffer_attrs = {SfBufferAttr_HipcPointer | SfBufferAttr_In},
-                           .buffers = {{ids, sizeof ids}}, .in_send_pid = true);
-}
-
-/* The controllers and the touchscreen, once: the start screen (a8r_menu.c)
- * uses them before the game does. */
 void a8r_input_hw_init(void) {
   static int done;
   if (done)
     return;
   done = 1;
-  padConfigureInput(8, HidNpadStyleSet_NpadStandard);
-  Result rc = set_supported_npad_ids();
+  /* players 1-8 and handheld, the list sent as 32-bit IDs (rt_pad.c) */
+  Result rc = rt_pad_setup(RT_PAD_MAX_PLAYERS, 1);
   hidSetNpadJoyHoldType(HidNpadJoyHoldType_Horizontal); /* a single Joy-Con, held sideways */
   debugPrintf("[input] controllers allowed: players 1-8 and handheld, any style (%s)\n",
               R_SUCCEEDED(rc) ? "ok" : "hid refused it: only the attached Joy-Cons will work");

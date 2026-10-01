@@ -32,8 +32,8 @@
  * and the APK's signing certificate (SUtils.retrieveBarrels hands its hash to
  * the engine).
  *
- * UPDATES FROM THE NRO: as in the other ports (the ExeFS override rewritten
- * from a newer launcher NRO in the game folder, then a restart). MIT.
+ * UPDATES FROM THE NRO are the runtime's (dcr_setup.c); new zips copied into
+ * the game folder later are handed to the launcher from here. MIT.
  */
 #include <dirent.h>
 #include <stdarg.h>
@@ -53,14 +53,13 @@
 #include "a8r_menu.h"
 #include "a8r_zips.h"
 #include "config.h"
-#include "dcr_build.h"
 #include "dcr_config.h"
 #include "dcr_exefs.h"
 #include "dcr_formats.h"
+#include "dcr_path.h"
+#include "dcr_setup.h"
 #include "error.h"
 #include "util.h"
-
-const char *dcr_game_root(void); /* main.c */
 
 static void root_path(char *out, size_t cap, const char *name) {
   snprintf(out, cap, "%s/%s", dcr_game_root(), name);
@@ -76,30 +75,16 @@ static void int_path(char *out, size_t cap, const char *rel) {
   snprintf(out, cap, "%s/data/%s", dcr_game_root(), rel);
 }
 
-/* Setup work is shown on screen (the log is otherwise off-screen: config.ini
- * [debug] boot_log_on_screen). */
 /* Setup's progress, only when there is real work (a first launch, a new APK
- * or options, a new build): a bar with the step in plain words, on the boot
- * console, or on the start screen's renderer once that has the window
- * (a8r_menu_progress). The whole launch, in permille:
+ * or options, a new build): the runtime's bar (dcr_setup_progress), on the
+ * boot console, or on the start screen's renderer once that has the window
+ * (a8r_menu.c registers it). The whole launch, in permille:
  *     0- 700  the engine put together (its five hidden assets, then written)
  *   700- 850  the Java class list
  *   850- 950  the data folder's texts updated
  *        1000 the game starts
  * An update from the NRO and new zips for the launcher show one step each,
  * before the restart. */
-static int g_setup_shown;
-static void setup_progress(const char *what, int permille) {
-  if (!g_setup_shown) {
-    g_setup_shown = 1;
-    debugPrintf("[setup] setting up Asphalt 8: Airborne Retry\n");
-  }
-  if (log_console_active())
-    log_console_progress(what, permille);
-  else
-    a8r_menu_progress(what, permille);
-  log_console_update(); /* the log on screen, if it is */
-}
 
 static long file_size(const char *path) {
   struct stat st;
@@ -389,7 +374,7 @@ static void ensure_engine(void) {
   if (s && s->crc == (unsigned long)crc && file_size(dst) == (long)s->size)
     return; /* made from this APK with these options before */
 
-  setup_progress("Putting the game's engine together", 0);
+  dcr_setup_progress("Putting the game's engine together", 0);
   debugPrintf("[setup] putting the game's engine together from A8R.apk (%s)...\n",
               s ? "the options or the APK changed" : "first launch");
   log_console_update();
@@ -426,7 +411,7 @@ static void ensure_engine(void) {
     }
     mz_zip_reader_end(&zip);
     free(z);
-    setup_progress("Putting the game's engine together", (k + 1) * 550 / NPARTS);
+    dcr_setup_progress("Putting the game's engine together", (k + 1) * 550 / NPARTS);
   }
 
   size_t total = 0;
@@ -463,7 +448,7 @@ static void ensure_engine(void) {
   }
   if (total < 0x34 || memcmp(lib, "\177ELF", 4))
     fatal_error("The engine put together from %s is not a library (damaged APK?).", g_apk_path);
-  setup_progress("Writing the game's engine", 600);
+  dcr_setup_progress("Writing the game's engine", 600);
   if (!write_atomic(dst, lib, total))
     fatal_error("Could not write %s (%u KB).\n\nIs the SD card full or read-only?", dst,
                 (unsigned)(total >> 10));
@@ -502,7 +487,7 @@ static void ensure_classes(void) {
   if (!n || (s && s->crc == (unsigned long)crc && s->size == (unsigned long)n && file_size(dst) > 0))
     return;
 
-  setup_progress("Reading the game's Java classes", 700);
+  dcr_setup_progress("Reading the game's Java classes", 700);
   debugPrintf("[setup] listing the Java classes of A8R.apk (%d dex file%s)...\n", n, n > 1 ? "s" : "");
   log_console_update();
   Names ns = {0};
@@ -861,7 +846,7 @@ static int prepare_texts(void) {
   int current = cur && memmem(cur, n, "2025M4D25", 9) != NULL;
   free(cur);
   if (!current) { /* updatePatch */
-    setup_progress("Updating the game's texts", 850);
+    dcr_setup_progress("Updating the game's texts", 850);
     debugPrintf("[setup] the data folder's texts are older than the APK: applying its update.zip\n");
     log_console_update();
     w |= extract_asset_zip("update.zip", dir) > 0;
@@ -1001,122 +986,7 @@ void a8r_setup(const char *apk) {
   read_signature();
   stamp_save();
   ensure_data();
-  if (g_setup_shown)
-    setup_progress("Starting the game", 1000);
-}
-
-/* ---------------------------------------------------- updates from the NRO */
-static uint64_t find_nro(char *path, size_t cap) {
-  uint64_t best = 0;
-  DIR *d = opendir(dcr_game_root());
-  if (!d)
-    return 0;
-  struct dirent *e;
-  while ((e = readdir(d))) {
-    size_t n = strlen(e->d_name);
-    if (n < 5 || strcasecmp(e->d_name + n - 4, ".nro"))
-      continue;
-    char p[320];
-    root_path(p, sizeof p, e->d_name);
-    FILE *f = fopen(p, "rb");
-    if (!f)
-      continue;
-    uint64_t b = nro_build(f);
-    fclose(f);
-    if (b > best) {
-      best = b;
-      snprintf(path, cap, "%s", p);
-    }
-  }
-  closedir(d);
-  return best;
-}
-
-void dcr_setup_update_from_nro(void) {
-  u64 tid = 0;
-  if (R_FAILED(svcGetInfo(&tid, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0)) || !exefs_is_forwarder_tid(tid))
-    return;
-  char ovr[128], marker[300], nro[320];
-  snprintf(ovr, sizeof ovr, "sdmc:/atmosphere/contents/%016llX/exefs.nsp", (unsigned long long)tid);
-  root_path(marker, sizeof marker, ".update");
-  if (file_size(ovr) <= 0)
-    return;
-
-  uint64_t attempted = 0;
-  FILE *mf = fopen(marker, "r");
-  if (mf) {
-    if (fscanf(mf, "%llu", (unsigned long long *)&attempted) != 1)
-      attempted = 0;
-    fclose(mf);
-    if (attempted <= DCR_BUILD)
-      unlink(marker);
-  }
-  uint64_t build = find_nro(nro, sizeof nro);
-  debugPrintf("[setup] build %llu%s\n", (unsigned long long)DCR_BUILD,
-              build > DCR_BUILD ? "; the launcher NRO carries a newer one" : "");
-  if (build <= DCR_BUILD)
-    return;
-  if (attempted == build) {
-    debugPrintf("[setup] %s: build %llu was installed but this is still build %llu -- not retrying "
-                "(delete %s to try again)\n", nro, (unsigned long long)build,
-                (unsigned long long)DCR_BUILD, marker);
-    return;
-  }
-
-  size_t cur_len = 0, npdm_len, nsp_len = 0;
-  uint8_t *cur = read_whole(ovr, &cur_len);
-  const uint8_t *npdm;
-  uint64_t pid = 0;
-  int is64 = 1;
-  int ours = cur && exefs_find(cur, cur_len, "main.npdm", &npdm, &npdm_len) == 0 &&
-             npdm_info(npdm, npdm_len, &pid, &is64) == 0 && pid == tid && !is64;
-  free(cur);
-  if (!ours)
-    return;
-
-  FILE *f = fopen(nro, "rb");
-  long off;
-  uint8_t *nsp = NULL, *out = NULL;
-  size_t out_len = 0;
-  if (f && nro_romfs_file(f, "a8retry_nx.nsp", &off, &nsp_len) == 0 && (nsp = malloc(nsp_len)) &&
-      fseek(f, off, SEEK_SET) == 0 && fread(nsp, 1, nsp_len, f) == nsp_len)
-    exefs_build_override(nsp, nsp_len, tid, &out, &out_len);
-  if (f)
-    fclose(f);
-  free(nsp);
-  if (!out) {
-    debugPrintf("[setup] %s: its copy of the wrapper is unreadable -- not updating\n", nro);
-    return;
-  }
-  setup_progress("Updating to the new build, then restarting", 500);
-  debugPrintf("[setup] updating to build %llu from %s, then restarting...\n", (unsigned long long)build, nro);
-  log_console_update();
-  char tmp[160];
-  snprintf(tmp, sizeof tmp, "%s.part", ovr);
-  FILE *o = fopen(tmp, "wb");
-  int ok = o && fwrite(out, 1, out_len, o) == out_len;
-  if (o && fclose(o) != 0)
-    ok = 0;
-  free(out);
-  if (ok) {
-    unlink(ovr);
-    ok = rename(tmp, ovr) == 0;
-  }
-  if (!ok) {
-    unlink(tmp);
-    debugPrintf("[setup] could not write %s -- still running build %llu\n", ovr, (unsigned long long)DCR_BUILD);
-    return;
-  }
-  mf = fopen(marker, "w");
-  if (mf) {
-    fprintf(mf, "%llu\n", (unsigned long long)build);
-    fclose(mf);
-  }
-  log_flush_ring();
-  Result rc = appletRestartProgram(NULL, 0);
-  fatal_error("Updated to build %llu from %s.\n\n"
-              "Restarting did not work (0x%x): close the game and launch it again.",
-              (unsigned long long)build, nro, (unsigned)rc);
+  rt_setup_finish(); /* "Starting the game", if anything was shown (dcr_setup.c) */
 }
 
 /* ------------------------------------------------ zips for the launcher */
@@ -1141,22 +1011,6 @@ static int is_mod_zip(const char *path) {
     }
   mz_zip_reader_end(&z);
   return a8r_zip_kind(&s) != A8R_ZIP_OTHER;
-}
-
-/* An APK of any name is the mod's by what it holds (a8r_zips.h): for
- * a8r_adopt_apk() in main.c. */
-int a8r_is_mod_apk(const char *path) {
-  mz_zip_archive z;
-  memset(&z, 0, sizeof z);
-  if (!mz_zip_reader_init_file(&z, path, 0))
-    return 0;
-  A8rApkScan s = {0};
-  char name[512];
-  for (mz_uint i = 0, n = mz_zip_reader_get_num_files(&z); i < n; i++)
-    if (mz_zip_reader_get_filename(&z, i, name, sizeof name) < sizeof name)
-      a8r_apk_scan(&s, name);
-  mz_zip_reader_end(&z);
-  return a8r_apk_is_mod(&s);
 }
 
 void dcr_setup_zips_to_launcher(void) {
@@ -1203,16 +1057,6 @@ void dcr_setup_zips_to_launcher(void) {
     fprintf(mf, "%s\n", key);
     fclose(mf);
   }
-  setup_progress("New game files: restarting to install them", 500);
   debugPrintf("[setup] zip %s: restarting into the launcher to install it...\n", key);
-  log_console_update();
-  if (unlink(ovr) != 0) {
-    debugPrintf("[setup] could not remove %s -- not installing the zips\n", ovr);
-    return;
-  }
-  log_flush_ring();
-  Result rc = appletRestartProgram(NULL, 0);
-  fatal_error("Found new A8R zips in %s: the launcher installs them.\n\n"
-              "Restarting did not work (0x%x): close the game and launch it again.",
-              dcr_game_root(), (unsigned)rc);
+  rt_setup_restart_into_launcher("New game files: restarting to install them"); /* dcr_setup.c */
 }

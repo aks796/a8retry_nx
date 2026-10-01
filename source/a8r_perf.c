@@ -216,7 +216,6 @@ static u32 cpu_mhz_now(void) {
 }
 
 /* ---------------------------------------------------------------- the GL thread */
-__thread int g_a8r_on_gl_thread;
 static Handle g_gl_h = INVALID_HANDLE;
 
 /* Guest threads share priority 59, where the kernel time-slices them every

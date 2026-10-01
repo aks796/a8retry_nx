@@ -3,6 +3,7 @@
 #define A8R_H
 #include <stdint.h>
 
+#include "bionic_io.h"
 #include "jni.h"
 #include "so_util.h"
 
@@ -23,16 +24,14 @@
 extern so_module g_mod_game;               /* libasphalt8.so (a8r_loader.c) */
 int a8r_load_engine(void);                 /* 0 on success */
 void a8r_run_constructors(void);
+int a8r_boot_run(void);                    /* a8r_boot.c: the activity, the GL thread, the UI loop */
 void *a8r_native(const char *symbol);      /* an engine export, or NULL */
 
 /* -------------------------------------------------------------- setup */
 void a8r_setup(const char *apk);           /* a8r_setup.c: the engine, the data */
-void dcr_setup_update_from_nro(void);
 /* New A8R zips in the game folder: back to the launcher, which installs them. */
 void dcr_setup_zips_to_launcher(void);
 const char *a8r_apk_path(void);
-/* path is an APK of the A8R mod, whatever its name (a8r_zips.h). */
-int a8r_is_mod_apk(const char *path);
 /* Contents of an asset of A8R.apk (malloc'd, *len set), or NULL. */
 uint8_t *a8r_apk_asset(const char *name, size_t *len);
 /* The APK's signing certificate as Signature.hashCode() sees it (0 if none). */
@@ -71,11 +70,13 @@ int a8r_cpu_hands_off(void);      /* the clock is the system's or a tool's: no b
 void a8r_cpu_boost(int on);       /* loading: the CPU at 1785 MHz, the GPU untouched */
 void a8r_perf_gl_thread(void);    /* the GL thread, once: above the other guest threads */
 int a8r_glthread_up(void);        /* Mesa's glthread worker is running */
-extern __thread int g_a8r_on_gl_thread;
+/* the GL thread's file work is counted apart (bionic_io.c: dcr_io_gl_stats) */
+#define g_a8r_on_gl_thread dcr_io_tagged_thread
 void a8r_perf_frame(u64 step_ticks, u64 swap_ticks);
 void a8r_perf_report(void);
 void a8r_perf_gpu_begin(void);
 void a8r_perf_gpu_end(void);
+void a8r_gl_hooks(void);          /* a8r_gl.c: the frame hook, before the first frame */
 
 /* -------------------------------------------------------------- input */
 void a8r_input_hw_init(void);   /* controllers + touch, before the engine */

@@ -1455,8 +1455,9 @@ static void frame(void) {
 }
 
 /* After PLAY the screen stays EGL's (the console cannot have the window back)
- * until the setup is done: a8r_menu_progress draws its progress, and
- * a8r_menu_done gives the window up for the game. */
+ * until the setup is done: menu_progress draws its progress (the runtime's
+ * progress screen, log_progress_set_renderer), and a8r_menu_done gives the
+ * window up for the game. */
 static int g_kept;
 static int g_toured; /* the test tour ran (.menu_tour): each progress step is captured too */
 static uint8_t *g_font_main, *g_font_fallback;
@@ -1464,6 +1465,7 @@ static uint8_t *g_font_main, *g_font_fallback;
 void a8r_menu_done(void) {
   if (!g_kept)
     return;
+  log_progress_set_renderer(NULL);
   g_kept = 0;
   for (int i = 0; i < IM_COUNT; i++)
     ui_image_free(&g_im[i]);
@@ -1476,7 +1478,7 @@ void a8r_menu_done(void) {
 /* The console's progress screen (util.c, log_console_progress), drawn with
  * the start screen's renderer: the game's name in green, why, a green bar
  * and the step. Redrawn only when the step or the whole percent changes. */
-void a8r_menu_progress(const char *what, int permille) {
+static void menu_progress(const char *title, const char *note, const char *what, int permille) {
   static char last[96];
   static int last_pct = -1;
   if (!g_kept)
@@ -1490,9 +1492,8 @@ void a8r_menu_progress(const char *what, int permille) {
   const uint32_t green = 0xFF4CE05Au, track = 0xFF2A2D33u;
   float W = ui_w(), H = ui_h();
   ui_begin(0xFF000000u);
-  text_in("Asphalt 8: Airborne Retry", sp(24), 0, H * 0.36f, W, sp(30), green, 0, 1);
-  text_in("Getting the game ready (after an install or an update)", sp(16), 0, H * 0.43f, W, sp(22),
-          C_WHITE, 0, 1);
+  text_in(title, sp(24), 0, H * 0.36f, W, sp(30), green, 0, 1);
+  text_in(note, sp(16), 0, H * 0.43f, W, sp(22), C_WHITE, 0, 1);
   float bw = W * 0.56f, bh = dp(14), bx = (W - bw) / 2 - dp(24), by = H * 0.52f;
   ui_rect(bx, by, bw, bh, track);
   ui_rect(bx, by, bw * permille / 1000.0f, bh, green);
@@ -1502,7 +1503,6 @@ void a8r_menu_progress(const char *what, int permille) {
   text_in(last, sp(16), 0, H * 0.58f, W, sp(22), 0xFFB8BEC8u, 0, 1);
   static char captured[96];
   if (g_toured && strcmp(captured, last)) {
-    void dcr_gl_capture_now(void); /* gl_mesa.c */
     snprintf(captured, sizeof captured, "%s", last);
     ui_flush();
     dcr_gl_capture_now();
@@ -1597,6 +1597,7 @@ int a8r_menu_run(const char *apk) {
   for (int i = 0; i < SFX_COUNT; i++)
     free(g_sfx_mp3[i]), g_sfx_mp3[i] = NULL;
   g_kept = 1; /* PLAY: the screen stays up for the setup's progress */
+  log_progress_set_renderer(menu_progress);
   if (g_result != 1)
     a8r_menu_done();
   if (g_zip_ok)

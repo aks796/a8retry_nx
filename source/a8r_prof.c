@@ -33,7 +33,9 @@
 #include <string.h>
 #include <switch.h>
 
+#include "a8r.h"
 #include "a8r_prof.h"
+#include "bionic_io.h"
 #include "bionic_pthread.h"
 #include "dcr_config.h"
 #include "util.h"
@@ -501,4 +503,38 @@ static void report(const char *what, uint64_t ms) {
     shown[best] = 1;
     report_thread(best, ticks);
   }
+}
+
+/* ------------------------------------------------- the runtime's callbacks */
+/* zlib's inflate counted as loading work (bionic_zlib.c: RT_PROF_* = PC_*) */
+uint64_t port_prof_begin(void) { return dcr_pc_begin(); }
+void port_prof_end(int counter, uint64_t t0, uint64_t bytes) { dcr_pc_end(counter, t0, bytes); }
+
+/* The CPU boost (dcr_boost.c): the CPU clock alone where the clock driver is
+ * ours (a8r_perf.c), nothing where the clock is the system's or a tool's,
+ * else the system's boost mode. */
+int port_cpu_boost_set(int on) {
+  if (a8r_cpu_hands_off()) /* cpu_clock = system, or an overclocking tool took the clock */
+    return 0;
+  if (a8r_cpu_managed()) { /* the CPU clock alone, the GPU untouched (a8r_perf.c) */
+    a8r_cpu_boost(on);
+    return 1;
+  }
+  return -1;
+}
+
+/* At PLAY: the clocks for the game (a8r_perf.c). */
+void port_perf_clocks(void) { a8r_perf_clocks(); }
+
+/* A long frame's loading counters: since it passed 50 ms, or (startup) since
+ * the start, with the file read patterns once the game is up. */
+static DcrPc s_pc0[PC_N];
+void port_boost_snapshot(void) { dcr_pc_snapshot(s_pc0); }
+int port_boost_format(char *out, size_t cap, int startup) {
+  if (startup) {
+    dcr_io_report_patterns();
+    dcr_io_report_readahead();
+  }
+  dcr_pc_format(out, cap, startup ? NULL : s_pc0);
+  return (int)strlen(out);
 }

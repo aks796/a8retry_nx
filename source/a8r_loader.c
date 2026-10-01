@@ -20,9 +20,8 @@
  *   constructors                         244 of them, when Android's
  *                                        System.load would run them
  *
- * The engine never writes its own code, so the code-space hooks the memory
- * shims ask (codespace.h: PvZ's mod patches its engine at run time) are
- * answered with "not ours" here. MIT.
+ * The engine never writes its own code: the runtime's code-space defaults
+ * (codespace.c) are right for it. MIT.
  */
 #include <malloc.h>
 #include <stdio.h>
@@ -30,8 +29,9 @@
 #include <switch.h>
 
 #include "a8r.h"
-#include "codespace.h"
 #include "config.h"
+#include "dcr_path.h"
+#include "emu_fixups.h"
 #include "imports.h"
 #include "util.h"
 
@@ -39,47 +39,8 @@ static void patch_steering(so_module *m); /* below */
 
 so_module g_mod_game;
 
-const char *dcr_game_root(void); /* main.c */
-
-/* ----------------------------------------------------- code space: none */
-volatile int g_cs_armed;
-void *cs_mmap(size_t len, int prot, const void *caller) { return NULL; }
-int cs_munmap(void *addr, size_t len) { return 0; }
-int cs_mprotect(void *addr, size_t len, int prot, const void *caller) { return 0; }
-int cs_write(void *dst, const void *src, size_t n, int c, int kind) { return 0; }
-
-/* ----------------------------------------------------- kernel helpers */
-void dcr_kuser_cmpxchg(void);
-void dcr_kuser_memory_barrier(void);
-
-static void fix_kuser_helpers(so_module *m) {
-  int cmpxchg = 0, barrier = 0, other = 0;
-  for (int i = 0; i < m->phnum; i++) {
-    const Elf32_Phdr *ph = &m->phdr[i];
-    if (ph->p_type != PT_LOAD || !(ph->p_flags & PF_X))
-      continue;
-    uint32_t *w = (uint32_t *)((uintptr_t)((uint8_t *)m->load_base + ph->p_vaddr + 3) & ~3u);
-    size_t nw = ph->p_filesz / 4;
-    for (size_t k = 0; k < nw; k++) {
-      if ((w[k] & 0xfffff000u) != 0xffff0000u || (w[k] & 0xfff) < 0xf60)
-        continue;
-      if (w[k] == 0xffff0fc0u) {
-        w[k] = (uint32_t)(uintptr_t)dcr_kuser_cmpxchg;
-        cmpxchg++;
-      } else if (w[k] == 0xffff0fa0u) {
-        w[k] = (uint32_t)(uintptr_t)dcr_kuser_memory_barrier;
-        barrier++;
-      } else if (w[k] == 0xffff0f60u || w[k] == 0xffff0fe0u || w[k] == 0xffff0ffcu) {
-        other++;
-      }
-    }
-  }
-  debugPrintf("[boot] %s: kernel user helpers -> kuser.S (%d cmpxchg, %d barrier%s)\n", m->base_name,
-              cmpxchg, barrier, other ? "; others look like data, left alone" : "");
-}
 
 /* ------------------------------------------------------------- loading */
-int dcr_emu_fix_vcvt(so_module *m, uint32_t *pool, size_t pool_words); /* emu_fixups.c */
 
 #define EMU_POOL_BYTES 0x10000u
 
@@ -89,19 +50,19 @@ int a8r_load_engine(void) {
   u64 t0 = armGetSystemTick();
   /* Under an emulator the image runs where it is staged: stage it with room
    * behind it for the instruction stubs (emu_fixups.c), within branch range. */
-  void *base = dcr_is_emulator() ? memalign(0x1000, SO_REGION_BYTES) : NULL;
-  int rc = so_load(&g_mod_game, path, base, base ? SO_REGION_BYTES - EMU_POOL_BYTES : SO_REGION_BYTES);
+  void *base = dcr_is_emulator() ? memalign(0x1000, PORT_SO_REGION_BYTES) : NULL;
+  int rc = so_load(&g_mod_game, path, base, base ? PORT_SO_REGION_BYTES - EMU_POOL_BYTES : PORT_SO_REGION_BYTES);
   if (rc < 0) {
     const char *why = rc == -1 ? "cannot open it, or it is not a 32-bit ARM ELF"
                     : rc == -2 ? "out of memory"
-                    : rc == -3 ? "larger than SO_REGION_BYTES"
+                    : rc == -3 ? "larger than PORT_SO_REGION_BYTES"
                     : rc == -4 ? "too many program headers" : "?";
     debugPrintf("[boot] so_load(%s) failed rc=%d: %s\n", path, rc, why);
     return -1;
   }
   so_relocate(&g_mod_game);
   int missing = so_resolve(&g_mod_game, dcr_imports, dcr_imports_count, 1);
-  fix_kuser_helpers(&g_mod_game);
+  so_fix_kuser_helpers(&g_mod_game); /* the kuser literals -> kuser.S (so_util.c) */
   patch_steering(&g_mod_game);
   if (base) {
     uint32_t *pool = (uint32_t *)((uint8_t *)base + g_mod_game.load_size);

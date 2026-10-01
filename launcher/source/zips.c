@@ -23,6 +23,7 @@
 #include <minizip/unzip.h>
 
 #include "a8r_zips.h"
+#include "launcher.h"
 #include "zips.h"
 
 #define MAX_ZIPS 16
@@ -169,46 +170,6 @@ static void mkdirs(char *path) {
     }
   mkdir(path, 0777);
 }
-
-static int g_bar_on;
-
-void launcher_bar(const char *what, int permille) {
-  static char last[96];
-  static int last_pct = -1;
-  permille = permille < 0 ? 0 : permille > 1000 ? 1000 : permille;
-  int pct = permille / 10;
-  if (g_bar_on && pct == last_pct && !strncmp(what, last, sizeof last - 1))
-    return;
-  g_bar_on = 1;
-  last_pct = pct;
-  snprintf(last, sizeof last, "%s", what);
-  enum { COLS = 80, BAR = 56 };
-  int fill = permille * BAR / 1000;
-  char bar[BAR + 1];
-  for (int i = 0; i < BAR; i++)
-    bar[i] = i < fill ? '#' : '-';
-  bar[BAR] = 0;
-  static const char title[] = "Asphalt 8: Airborne Retry";
-  static const char note[] = "Getting the game ready (after an install or an update)";
-  printf("\x1b[2J");
-  printf("\x1b[18;%dH\x1b[32;1m%s\x1b[0m", (COLS - (int)sizeof title + 1) / 2 + 1, title);
-  printf("\x1b[20;%dH%s", (COLS - (int)sizeof note + 1) / 2 + 1, note);
-  printf("\x1b[23;%dH[\x1b[32m%s\x1b[0m] %3d%%", (COLS - BAR - 7) / 2 + 1, bar, pct);
-  int wl = (int)strlen(last);
-  printf("\x1b[25;%dH%s", wl < COLS ? (COLS - wl) / 2 + 1 : 1, last);
-  fflush(stdout);
-  consoleUpdate(NULL);
-}
-
-void launcher_bar_off(void) {
-  if (!g_bar_on)
-    return;
-  g_bar_on = 0;
-  printf("\x1b[2J\x1b[1;1HAsphalt 8: Airborne Retry for Nintendo Switch -- launcher\n\n");
-  consoleUpdate(NULL);
-}
-
-int launcher_bar_on(void) { return g_bar_on; }
 
 static void progress(Progress *p, int force) {
   u64 now = armGetSystemTick();

@@ -14,6 +14,26 @@ items below were found in one of the three and apply to all of them.
 
 File paths are relative to this project.
 
+**The android32 runtime.** Since build 202610010034 the code every 32-bit port
+shares (the loader, bionic, JNI core, GL glue, clocks, paths, setup, config
+engine, crash handler, watchdog, `main()` and the launcher) is the android32
+runtime, linked in as `runtime/` (built against commit `42f2519`). Where this
+file names a shared file, such as `source/bionic_time.c` or
+`source/dcr_sched.c`, it is now in `runtime/source/`. This port keeps the
+game's own files (`a8r_*.c`, `dcr_config.c` as an option table, `dcr_prefs.c`)
+and joins the runtime through `source/port_config.h` and its `port_*`
+callbacks:
+
+- `a8r_main.c`: `port_load` (the start screen, the boost, the engine's
+  assembly and load) and `port_run`;
+- `a8r_gl.c`: the GL wrappers (loading counters, the controller card) and the
+  swap callbacks;
+- `a8r_prof.c`: the boost and zlib counter callbacks;
+- `a8r_boot.c`: the focus callbacks and the watchdog hold;
+- `launcher/source/a8r_launcher.c`: the zips, the OBB check, the
+  missing-APK text and the instructions (the launcher needs runtime
+  `a69d175` or newer for the missing-APK text).
+
 ---
 
 ## 1. Updates the 32-bit libraries need
@@ -181,6 +201,17 @@ is needed by any program that uses libpng on this toolchain.
 - **Code pages are never made writable.** `source/so_util.c`,
   `so_patch_code`, writes through a temporary alias, one kernel memory block
   per call.
+- **HOME and sleep freeze the whole process, silently by default.** libnx
+  sets applications to `AppletFocusHandlingMode_SuspendHomeSleep`, where the
+  system freezes the process without sending focus messages. The system tick
+  keeps running, so the first frame after waking saw the whole sleep: 79
+  minutes of physics in one frame, a 14 s hang (hardware, 2026-09-30).
+  - `source/a8r_boot.c` switches to `SuspendHomeSleepNotify`, so the focus
+    hook runs onPause and onResume when the process runs again.
+  - `source/bionic_time.c` hides process freezes from every clock. A thread
+    reads the clock every 100 ms, and a gap of more than 2 s between readings
+    is left out of MONOTONIC and REALTIME alike (this game's frame timer uses
+    `gettimeofday`).
 - **Nothing is mapped at the Linux kuser page.** Code built with old libgcc
   calls 0xffff0fc0 (cmpxchg) and 0xffff0fa0 (barrier). `source/kuser.S`
   provides both, and `source/a8r_loader.c` repoints the engine's literals to
@@ -305,6 +336,9 @@ JUMP_SLOT and RELATIVE relocations. Per-thread data goes through pthread keys
   `GetProfilesStr`, `getGLUID`, and `retrieveBarrels`. The last one needs the
   APK's signing certificate hash.
 - `classes.txt`, the class list from the APK's dex, backs `FindClass`.
+- `SendInfo.getSDFolder` must answer the data folder. The social framework's
+  cache is that path + `/sf_cache`, so with no answer it was created at the
+  SD card's root.
 
 **Audio** (`source/opensles.c`). The engine's audio is told API level 9, so it
 always uses OpenSL ES. `opensles.c` implements the engine, output mix and

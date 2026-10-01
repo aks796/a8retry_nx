@@ -53,16 +53,14 @@
 #include "dcr_sched.h"
 #include "dcr_time.h"
 #include "error.h"
+#include "dcr_apkcache.h"
+#include "dcr_boost.h"
 #include "gl_layer.h"
+#include "rt_applet.h"
+#include "rt_window.h"
 #include "util.h"
+#include "watchdog.h"
 
-void dcr_watchdog_start(void);
-void dcr_boost_poll(void);
-void dcr_boost_report(void);
-void dcr_boost_launch_end(void);
-void dcr_apkcache_report(void);
-void dcr_window_prepare(void);          /* android_ndk.c */
-void dcr_window_size(int *w, int *h);
 void dcr_config_locale(const char *lang, const char *country, int density);
 int b_pthread_create(b_pthread_t *out, const b_pthread_attr_t *attr, void *(*start)(void *), void *arg);
 int b_pthread_create_on(b_pthread_t *out, const b_pthread_attr_t *attr, void *(*start)(void *), void *arg,
@@ -142,7 +140,7 @@ static int g_nextra, g_gles = 2;
 static int g_w = 1280, g_h = 720;
 
 static volatile int g_view_requested, g_gl_up, g_gl_running;
-static volatile int g_exit, g_paused, g_focused = 1, g_focus_changed, g_started;
+static volatile int g_exit, g_paused;
 static uint64_t g_steps;
 
 /* The UI thread -> GL thread queue: touches (GL2JNIView's h runnables) and
@@ -429,48 +427,23 @@ static void *gl_thread(void *arg) {
 
 /* ---------------------------------------------------------- the watchdog */
 uint64_t dcr_boot_frames(void) { return dcr_gl_frames(); }
-int dcr_boot_in_focus(void) { return g_focused && g_started && !g_paused; }
+/* the game paused itself (the - menu, a touch held...): no frames expected */
+int port_watchdog_hold(void) { return g_paused; }
 
-/* ============================================================== lifecycle */
-static AppletHookCookie g_hook;
-
-static void on_applet(AppletHookType type, void *param) {
-  static const char *const names[] = {"focus state", "operation mode", "performance mode",
-                                      "EXIT REQUEST", "resume", "capture button",
-                                      "screenshot taken", "request to display"};
-  if (type == AppletHookType_OnExitRequest)
-    debugPrintf("[applet] the system asked the game to close\n");
-  else if ((unsigned)type < sizeof names / sizeof names[0])
-    debugPrintf("[applet] %s (focus %d, mode %d)\n", names[type], (int)appletGetFocusState(),
-                (int)appletGetOperationMode());
-  if (type == AppletHookType_OnFocusState || type == AppletHookType_OnOperationMode) {
-    int focused = appletGetFocusState() == AppletFocusState_InFocus;
-    if (focused != g_focused) {
-      g_focused = focused;
-      g_focus_changed = 1;
-    }
-  }
+/* ============================================================== lifecycle
+ * HOME and sleep (rt_applet.c tells, from the UI loop's rt_applet_poll): */
+void port_focus_lost(void) {
+  a8r_perf_focus(0); /* the normal CPU clock for the HOME menu */
+  post_wait(EV_PAUSE, 3000);
+  dcr_audio_pause(1);
 }
 
-static void apply_focus(void) {
-  if (!g_focus_changed || !g_started)
-    return;
-  g_focus_changed = 0;
-  if (!g_focused) {
-    debugPrintf("[boot] focus lost: onPause\n");
-    a8r_perf_focus(0); /* the normal CPU clock for the HOME menu */
-    post_wait(EV_PAUSE, 3000);
-    dcr_audio_pause(1);
-    log_flush_ring();
-    dcr_time_suspend();
-  } else {
-    a8r_perf_focus(1);
-    dcr_time_resume();
-    dcr_audio_pause(0);
-    call_v(GLN("onResume"), C_GL2JNILIB); /* onStart */
-    post_wait(EV_RESUME, 3000);           /* onResume: Game.Resume */
-    debugPrintf("[boot] focus regained: onResume\n");
-  }
+void port_focus_gaining(void) { a8r_perf_focus(1); }
+
+void port_focus_gained(void) {
+  dcr_audio_pause(0);
+  call_v(GLN("onResume"), C_GL2JNILIB); /* onStart */
+  post_wait(EV_RESUME, 3000);           /* onResume: Game.Resume */
 }
 
 static void exit_guard(void *arg) {
@@ -567,6 +540,7 @@ int a8r_boot_run(void) {
   a8r_java_init();
   dcr_config_locale("en", "US", dcr_config()->res_h >= 1080 ? 320 : 213);
   dcr_watchdog_start();
+  rt_watchdog_add_counter("audio writes", dcr_audio_writes);
   a8r_input_init();
   dcr_window_size(&g_w, &g_h);
 
@@ -599,7 +573,6 @@ int a8r_boot_run(void) {
 
   /* ---- onStart, onResume ---- */
   call_v(GLN("onResume"), C_GL2JNILIB);
-  appletHook(&g_hook, on_applet, NULL);
   if (!g_view_requested)
     debugPrintf("[boot] WARNING: the engine never asked for its view (createView); making it anyway\n");
 
@@ -611,7 +584,6 @@ int a8r_boot_run(void) {
    * (a8r_perf.c: a8r_perf_gl_thread) */
   if (b_pthread_create_on(&th, &attr, gl_thread, NULL, DCR_GUEST_PRIO - 1, 1) != 0)
     fatal_error("Could not start the rendering thread.");
-  g_started = 1;
   debugPrintf("[boot] activity up; this thread is the UI thread now\n");
   log_flush_ring();
 
@@ -620,9 +592,9 @@ int a8r_boot_run(void) {
   int launch_done = 0, announced = 0;
   unsigned long quiet_at = 0;
   const u64 input_period = armNsToTicks(8000000ull); /* 8 ms: twice per display frame */
-  while (!g_exit && appletMainLoop()) {
-    apply_focus();
-    if (!g_focused || !g_gl_up) {
+  while (!g_exit && !rt_exit_requested() && appletMainLoop()) {
+    rt_applet_poll(); /* focus, freezes (rt_applet.c); the first call starts the watchdog's watch */
+    if (!rt_focused() || !g_gl_up) {
       svcSleepThread(20000000ll);
       continue;
     }
@@ -657,7 +629,6 @@ int a8r_boot_run(void) {
         last_capture = now;
       if (armTicksToNs(now - last_capture) >= (u64)dcr_config()->capture_secs * 1000000000ull) {
         last_capture = now;
-        void dcr_gl_request_capture(void); /* gl_mesa.c */
         dcr_gl_request_capture();
       }
     }
@@ -687,9 +658,7 @@ int a8r_boot_run(void) {
   /* Android's way out: onPause (the game saves), then the process ends. */
   debugPrintf("[boot] leaving: onPause, onStop, onDestroy\n");
   log_set_quiet(0);
-  appletUnhook(&g_hook);
-  if (!g_focused)
-    dcr_time_resume(); /* frozen clocks would stall any timed wait in the shutdown */
+  rt_applet_stop(); /* the clocks resumed if the game was last told it lost focus */
   static Thread guard;
   if (R_SUCCEEDED(threadCreate(&guard, exit_guard, NULL, NULL, 0x4000, 0x2B, -2)))
     threadStart(&guard);
